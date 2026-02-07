@@ -1,10 +1,14 @@
 #pragma once
-#include "httplib.h"
+#include <windows.h>
+#include <wininet.h>
 #include "json.hpp"
 #include "CryptoData.h"
 #include <iostream>
 #include <vector>
 #include <string>
+
+// Link the native Windows Internet library
+#pragma comment(lib, "wininet.lib")
 
 using json = nlohmann::json;
 
@@ -12,50 +16,72 @@ class APIClient {
 public:
     static std::vector<CryptoCoin> fetchTopCoins(std::string& statusMsg) {
         std::vector<CryptoCoin> coins;
-        bool networkSuccess = false;
+        
+        // 1. Initialize WinINet (Native Windows Internet)
+        HINTERNET hInternet = InternetOpenA("CryptoTrackerApp", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+        if (!hInternet) {
+            statusMsg = "Error: Could not open Windows Internet.";
+            return coins;
+        }
 
-        // --- ATTEMPT 1: REAL NETWORK ---
-        try {
-            // Try CoinDesk (HTTP)
-            httplib::Client cli("api.coindesk.com", 80);
-            cli.set_connection_timeout(2); // Short timeout so UI doesn't freeze long
+        // 2. Open Secure HTTPS Connection to CoinGecko
+        // WinINet handles SSL/HTTPS automatically!
+        statusMsg = "Connecting...";
+        HINTERNET hConnect = InternetOpenUrlA(hInternet, 
+            "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=false", 
+            NULL, 0, INTERNET_FLAG_RELOAD | INTERNET_FLAG_SECURE, 0);
 
-            auto res = cli.Get("/v1/bpi/currentprice.json");
+        if (hConnect) {
+            // 3. Read the Data
+            std::string responseData;
+            char buffer[4096];
+            DWORD bytesRead;
 
-            if (res && res->status == 200) {
-                json result = json::parse(res->body);
+            while (InternetReadFile(hConnect, buffer, sizeof(buffer), &bytesRead) && bytesRead > 0) {
+                responseData.append(buffer, bytesRead);
+            }
+            InternetCloseHandle(hConnect);
 
-                CryptoCoin btc;
-                btc.id = "bitcoin";
-                btc.name = "Bitcoin";
-                btc.symbol = "BTC";
-                btc.current_price = result["bpi"]["USD"]["rate_float"].get<double>();
-                btc.price_change_24h = ((rand() % 200) - 100) / 100.0; // Fake change for demo
-                btc.market_cap = 0.0;
+            // 4. Parse JSON
+            try {
+                if (!responseData.empty()) {
+                    json result = json::parse(responseData);
+                    
+                    if (result.is_array()) {
+                        for (auto& item : result) {
+                            CryptoCoin coin;
+                            coin.id = item["id"].get<std::string>();
+                            coin.symbol = item["symbol"].get<std::string>();
+                            coin.name = item["name"].get<std::string>();
+                            coin.current_price = item["current_price"].get<double>();
+                            
+                            // Safe parsing for optional fields
+                            if (item.contains("price_change_percentage_24h") && !item["price_change_percentage_24h"].is_null()) {
+                                coin.price_change_24h = item["price_change_percentage_24h"].get<double>();
+                            }
+                            if (item.contains("market_cap") && !item["market_cap"].is_null()) {
+                                coin.market_cap = item["market_cap"].get<double>();
+                            }
 
-                coins.push_back(btc);
-                networkSuccess = true;
-                statusMsg = "Live Data (CoinDesk)";
+                            coins.push_back(coin);
+                        }
+                        statusMsg = "Live Data: Connected via WinINet (HTTPS)";
+                    } else {
+                        statusMsg = "Error: API did not return a list.";
+                    }
+                } else {
+                    statusMsg = "Error: Received empty response from server.";
+                }
+            }
+            catch (const std::exception& e) {
+                statusMsg = std::string("JSON Error: ") + e.what();
             }
         }
-        catch (...) {
-            // Network failed, just ignore and fall through to mock data
+        else {
+            statusMsg = "Connection Failed (WinINet Error)";
         }
 
-        // --- ATTEMPT 2: OFFLINE FALLBACK (If Network Failed) ---
-        if (!networkSuccess) {
-            statusMsg = "Offline Mode (Simulated)";
-
-            // Add Fake Data so the App is Usable
-            coins.push_back({ "bitcoin", "BTC", "Bitcoin", 64230.50, -1.25, 1200000000 });
-            coins.push_back({ "ethereum", "ETH", "Ethereum", 3450.10, 2.40, 400000000 });
-            coins.push_back({ "solana", "SOL", "Solana", 145.20, 5.10, 65000000 });
-            coins.push_back({ "cardano", "ADA", "Cardano", 0.45, -0.50, 15000000 });
-            coins.push_back({ "ripple", "XRP", "Ripple", 0.60, 1.10, 30000000 });
-            coins.push_back({ "polkadot", "DOT", "Polkadot", 7.20, -2.10, 10000000 });
-            coins.push_back({ "dogecoin", "DOGE", "Dogecoin", 0.12, 8.50, 18000000 });
-        }
-
+        InternetCloseHandle(hInternet);
         return coins;
     }
 };

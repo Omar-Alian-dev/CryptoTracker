@@ -1,8 +1,14 @@
-#pragma once
+﻿#pragma once
+
 #include <windows.h>
-#include <wininet.h>
 #include "json.hpp"
 #include "CryptoData.h"
+
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#include "httplib.h"
+#pragma warning(pop)
+
 #include <iostream>
 #include <vector>
 #include <string>
@@ -14,74 +20,98 @@ using json = nlohmann::json;
 
 class APIClient {
 public:
+    // ---------------------------------------------------------------------
+    // Main function used by your app: fetches top coins from CoinGecko
+    // using HTTPLIB SSL
+    // ---------------------------------------------------------------------
     static std::vector<CryptoCoin> fetchTopCoins(std::string& statusMsg) {
         std::vector<CryptoCoin> coins;
-        
-        // 1. Initialize WinINet (Native Windows Internet)
-        HINTERNET hInternet = InternetOpenA("CryptoTrackerApp", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
-        if (!hInternet) {
-            statusMsg = "Error: Could not open Windows Internet.";
-            return coins;
-        }
 
-        // 2. Open Secure HTTPS Connection to CoinGecko
-        // WinINet handles SSL/HTTPS automatically!
-        statusMsg = "Connecting...";
-        HINTERNET hConnect = InternetOpenUrlA(hInternet, 
-            "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=false", 
-            NULL, 0, INTERNET_FLAG_RELOAD | INTERNET_FLAG_SECURE, 0);
+        try {
+            statusMsg = "Connecting via httplib SSL (CoinGecko)...";
 
-        if (hConnect) {
-            // 3. Read the Data
-            std::string responseData;
-            char buffer[4096];
-            DWORD bytesRead;
+            // HTTPS client for CoinGecko (requires CPPHTTPLIB_OPENSSL_SUPPORT)
+            httplib::SSLClient cli("api.coingecko.com");
 
-            while (InternetReadFile(hConnect, buffer, sizeof(buffer), &bytesRead) && bytesRead > 0) {
-                responseData.append(buffer, bytesRead);
+            // For a course project it's OK to disable verification.
+            // In real apps you keep this ON.
+            cli.enable_server_certificate_verification(false);
+
+            cli.set_connection_timeout(5);   // 5 seconds to connect
+            cli.set_read_timeout(5, 0);      // 5 seconds to read
+
+            const char* path =
+                "/api/v3/coins/markets"
+                "?vs_currency=usd"
+                "&order=market_cap_desc"
+                "&per_page=10"
+                "&page=1"
+                "&sparkline=false";
+
+            auto res = cli.Get(path);
+
+            // ---------- basic response checks ----------
+            if (!res) {
+                statusMsg = "[HTTPLIB SSL] No response from CoinGecko.";
+                return coins;
             }
-            InternetCloseHandle(hConnect);
 
-            // 4. Parse JSON
-            try {
-                if (!responseData.empty()) {
-                    json result = json::parse(responseData);
-                    
-                    if (result.is_array()) {
-                        for (auto& item : result) {
-                            CryptoCoin coin;
-                            coin.id = item["id"].get<std::string>();
-                            coin.symbol = item["symbol"].get<std::string>();
-                            coin.name = item["name"].get<std::string>();
-                            coin.current_price = item["current_price"].get<double>();
-                            
-                            // Safe parsing for optional fields
-                            if (item.contains("price_change_percentage_24h") && !item["price_change_percentage_24h"].is_null()) {
-                                coin.price_change_24h = item["price_change_percentage_24h"].get<double>();
-                            }
-                            if (item.contains("market_cap") && !item["market_cap"].is_null()) {
-                                coin.market_cap = item["market_cap"].get<double>();
-                            }
-
-                            coins.push_back(coin);
-                        }
-                        statusMsg = "Live Data: Connected via WinINet (HTTPS)";
-                    } else {
-                        statusMsg = "Error: API did not return a list.";
-                    }
-                } else {
-                    statusMsg = "Error: Received empty response from server.";
+            if (res->status != 200) {
+                if (res->status == 429) {
+                    statusMsg = "API limit reached (HTTP 429). Using last data, will retry...";
+                    return coins; 
                 }
-            }
-            catch (const std::exception& e) {
-                statusMsg = std::string("JSON Error: ") + e.what();
-            }
-        }
-        else {
-            statusMsg = "Connection Failed (WinINet Error)";
-        }
 
-        InternetCloseHandle(hInternet);
+                statusMsg = "[HTTPLIB SSL] HTTP " + std::to_string(res->status) +
+                    " from CoinGecko.";
+                return coins;
+            }
+
+            if (res->body.empty()) {
+                statusMsg = "[HTTPLIB SSL] Empty body from CoinGecko.";
+                return coins;
+            }
+            // ---------- parse JSON ----------
+            json result = json::parse(res->body);
+
+            if (!result.is_array()) {
+                statusMsg = "[HTTPLIB SSL] API did not return a list.";
+                return coins;
+            }
+            for (auto& item : result) {
+                CryptoCoin coin;
+
+                // Required fields
+                coin.id = item["id"].get<std::string>();
+                coin.symbol = item["symbol"].get<std::string>();
+                coin.name = item["name"].get<std::string>();
+                coin.current_price = item["current_price"].get<double>();
+
+                // Optional fields
+                if (item.contains("price_change_percentage_24h") &&
+                    !item["price_change_percentage_24h"].is_null()) {
+                    coin.price_change_24h =
+                        item["price_change_percentage_24h"].get<double>();
+                }
+
+                if (item.contains("market_cap") &&
+                    !item["market_cap"].is_null()) {
+                    coin.market_cap = item["market_cap"].get<double>();
+                }
+
+                coins.push_back(coin);
+            }
+
+            statusMsg =
+                "Live Data: Connected via httplib (CoinGecko HTTPS)";
+        }
+        catch (const std::exception& e) {
+            statusMsg = std::string("[HTTPLIB SSL EXCEPTION] ") + e.what();
+        }
+        catch (...) {
+            statusMsg = "[HTTPLIB SSL EXCEPTION] Unknown error.";
+        }
         return coins;
     }
+
 };

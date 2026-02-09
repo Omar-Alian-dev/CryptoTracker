@@ -8,6 +8,10 @@
 #include <fstream>       // For file saving (Required)
 #include <unordered_set> // For storing favorites (Required)
 #include <algorithm>     // For search text conversion
+#include <filesystem>   // For filesystem (Required)
+namespace fs = std::filesystem;
+
+
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -33,6 +37,11 @@ std::mutex g_dataMutex;
 std::atomic<bool> g_running(true);
 std::atomic<bool> g_loading(false);
 
+// --- FILE PATHS (Grade Requirement: filesystem) ---
+const fs::path DATA_DIR = "data";
+const fs::path FAVORITES_FILE = DATA_DIR / "favorites.txt";
+
+
 // Helper Functions
 bool CreateDeviceD3D(HWND hWnd);
 void CleanupDeviceD3D();
@@ -42,23 +51,50 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 // --- FILE SYSTEM FUNCTIONS (Grade Requirement: fstream) ---
 void LoadFavorites() {
-    std::ifstream file("favorites.txt");
-    if (file.is_open()) {
-        std::string symbol;
-        while (std::getline(file, symbol)) {
-            if (!symbol.empty()) g_favorites.insert(symbol);
+    try {
+        // Ensure data directory exists
+        if (!fs::exists(DATA_DIR)) {
+            fs::create_directories(DATA_DIR);
         }
-        file.close();
+
+        // If the file doesn't exist yet, nothing to load
+        if (!fs::exists(FAVORITES_FILE)) {
+            return;
+        }
+
+        std::ifstream file(FAVORITES_FILE);
+        if (file.is_open()) {
+            std::string symbol;
+            while (std::getline(file, symbol)) {
+                if (!symbol.empty()) {
+                    g_favorites.insert(symbol);
+                }
+            }
+            file.close();
+        }
+    }
+    catch (const std::exception& e) {
+        g_statusMessage = std::string("Filesystem error (load): ") + e.what();
     }
 }
 
 void SaveFavorites() {
-    std::ofstream file("favorites.txt");
-    if (file.is_open()) {
-        for (const auto& symbol : g_favorites) {
-            file << symbol << "\n";
+    try {
+        // Ensure data directory exists
+        if (!fs::exists(DATA_DIR)) {
+            fs::create_directories(DATA_DIR);
         }
-        file.close();
+
+        std::ofstream file(FAVORITES_FILE);
+        if (file.is_open()) {
+            for (const auto& symbol : g_favorites) {
+                file << symbol << "\n";
+            }
+            file.close();
+        }
+    }
+    catch (const std::exception& e) {
+        g_statusMessage = std::string("Filesystem error (save): ") + e.what();
     }
 }
 
@@ -83,7 +119,7 @@ void DataFetcher() {
             std::lock_guard<std::mutex> lock(g_dataMutex);
             if (!newData.empty()) {
                 g_coins = newData;
-                g_statusMessage = "Updated: Data received.";
+                g_statusMessage = localError;
             }
             else {
                 g_statusMessage = "Error: " + localError;
@@ -165,6 +201,8 @@ int main(int, char**)
             ImGui::Checkbox("Show Favorites Only", &showFavoritesOnly);
 
             ImGui::Spacing();
+
+            ImGui::Text("Status: %s", g_statusMessage.c_str());
 
             // --- TABLE ---
             if (ImGui::BeginTable("Coins", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) {

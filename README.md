@@ -12,8 +12,6 @@
 - [✨ Features](#-features)
 - [🛠️ Technical Stack](#-technical-stack)
 - [🚀 Getting Started](#-getting-started)
-- [🔮 Future Enhancements](#-future-enhancements)
-- [👤 About the Developer](#-about-the-developer)
 - [🤝 Contributing](#-contributing)
 - [📄 License](#-license)
 
@@ -90,7 +88,7 @@ Traditional crypto dashboards often struggle with performance bottlenecks.
 | **Platform** | **Windows + DirectX11** | Backend rendering pipeline |
 
 ---
-🚀 Getting Started
+## 🚀 Getting Started
 Prerequisites
 Visual Studio 2022 (with C++ Desktop Development workload)
 
@@ -113,3 +111,22 @@ Open the .sln solution file in Visual Studio.
 Select Release or Debug configuration.
 
 Press F5 to build and run.
+
+---
+## 🤝 Contributing
+This is a private academic project. External contributions are not accepted at this time.
+
+🐛 Bug Reports
+If you've found a bug, please open an issue including:
+
+A clear description of the issue.
+
+Steps to reproduce.
+
+---
+## 📄 License
+Proprietary License
+
+Copyright (c) 2026 Tayseer Zeer, and Omar Alian All rights reserved.
+
+This software may not be copied, modified, or distributed without explicit permission from the author.

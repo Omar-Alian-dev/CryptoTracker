@@ -1,4 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <algorithm>
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
@@ -7,6 +9,7 @@
 #include <ws2tcpip.h>
 #include <fstream>       // For file saving (Required)
 #include <unordered_set> // For storing favorites (Required)
+#include <unordered_map>
 #include <algorithm>     // For search text conversion
 #include <filesystem>   // For filesystem (Required)
 namespace fs = std::filesystem;
@@ -36,6 +39,13 @@ std::string g_statusMessage = "Initializing...";
 std::mutex g_dataMutex;
 std::atomic<bool> g_running(true);
 std::atomic<bool> g_loading(false);
+std::string g_selectedSymbol; // Symbol of the coin currently selected in the UI
+std::unordered_map<std::string, std::vector<float>> g_priceHistory;
+
+// NEW: refresh interval (seconds)
+constexpr int DEFAULT_REFRESH_SECONDS = 30;  // was 10; now more gentle
+constexpr int MAX_REFRESH_SECONDS = 300; // 5 minutes max backoff
+std::atomic<int> g_refreshSeconds(DEFAULT_REFRESH_SECONDS);
 
 // --- FILE PATHS (Grade Requirement: filesystem) ---
 const fs::path DATA_DIR = "data";
@@ -110,25 +120,68 @@ void ToggleFavorite(const std::string& symbol) {
 
 // --- BACKGROUND THREAD ---
 void DataFetcher() {
+    int currentSleep = DEFAULT_REFRESH_SECONDS;
+
     while (g_running) {
         g_loading = true;
         std::string localError;
         std::vector<CryptoCoin> newData = APIClient::fetchTopCoins(localError);
 
+        bool rateLimited = false;
+
         {
             std::lock_guard<std::mutex> lock(g_dataMutex);
+
             if (!newData.empty()) {
+                // Update current snapshot
                 g_coins = newData;
-                g_statusMessage = localError;
+
+                // --- update price history (you already had this part earlier) ---
+                constexpr size_t MAX_HISTORY_POINTS = 120; // or whatever you chose
+                for (const auto& coin : g_coins) {
+                    auto& history = g_priceHistory[coin.symbol];
+                    history.push_back(static_cast<float>(coin.current_price));
+                    if (history.size() > MAX_HISTORY_POINTS) {
+                        size_t extra = history.size() - MAX_HISTORY_POINTS;
+                        history.erase(history.begin(), history.begin() + extra);
+                    }
+                }
+                // ----------------------------------------------------------------
+
+                g_statusMessage = "Live Data: refreshed every "
+                    + std::to_string(currentSleep) + "s";
             }
             else {
+                // Error path
                 g_statusMessage = "Error: " + localError;
+
+                // Detect rate-limit hint (HTTP 429 or message text)
+                if (localError.find("429") != std::string::npos ||
+                    localError.find("limit") != std::string::npos ||
+                    localError.find("Limit") != std::string::npos) {
+                    rateLimited = true;
+                }
             }
         }
+
         g_loading = false;
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+
+        // Adjust sleep time based on rate limiting
+        if (rateLimited) {
+            // Exponential backoff: double, but clamp to MAX_REFRESH_SECONDS
+            currentSleep = std::min(currentSleep * 2, MAX_REFRESH_SECONDS);
+        }
+        else {
+            // On success or non-rate-limit errors, use default frequency
+            currentSleep = DEFAULT_REFRESH_SECONDS;
+        }
+
+        g_refreshSeconds = currentSleep;
+
+        std::this_thread::sleep_for(std::chrono::seconds(currentSleep));
     }
 }
+
 
 // --- MAIN FUNCTION ---
 int main(int, char**)
@@ -203,6 +256,9 @@ int main(int, char**)
             ImGui::Spacing();
 
             ImGui::Text("Status: %s", g_statusMessage.c_str());
+            ImGui::SameLine();
+            ImGui::Text("(Refresh: %d s)", g_refreshSeconds.load());
+
 
             // --- TABLE ---
             if (ImGui::BeginTable("Coins", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) {
@@ -242,16 +298,88 @@ int main(int, char**)
                         ToggleFavorite(coin.symbol);
                     }
 
-                    ImGui::TableSetColumnIndex(1); ImGui::Text(coin.name.c_str());
-                    ImGui::TableSetColumnIndex(2); ImGui::Text(coin.symbol.c_str());
-                    ImGui::TableSetColumnIndex(3); ImGui::Text("$%.2f", coin.current_price);
+                    // Column 2: Name (clickable – selects this coin)
+                    ImGui::TableSetColumnIndex(1);
+                    bool isSelected = (!g_selectedSymbol.empty() && g_selectedSymbol == coin.symbol);
+                    if (ImGui::Selectable(coin.name.c_str(), isSelected)) {
+                        g_selectedSymbol = coin.symbol;
+                    }
 
+                    // Column 3: Symbol
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text(coin.symbol.c_str());
+
+                    // Column 4: Price
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("$%.2f", coin.current_price);
+
+                    // Column 5: 24h Change
                     ImGui::TableSetColumnIndex(4);
                     if (coin.price_change_24h >= 0)
                         ImGui::TextColored(ImVec4(0, 1, 0, 1), "+%.2f%%", coin.price_change_24h);
                     else
                         ImGui::TextColored(ImVec4(1, 0, 0, 1), "%.2f%%", coin.price_change_24h);
                 }
+                // --- SELECTED COIN DETAILS ---
+                if (!g_selectedSymbol.empty()) {
+                    const CryptoCoin* selected = nullptr;
+
+                    // Find the selected coin by symbol
+                    for (const auto& coin : g_coins) {
+                        if (coin.symbol == g_selectedSymbol) {
+                            selected = &coin;
+                            break;
+                        }
+                    }
+
+                    if (selected) {
+                        ImGui::Spacing();
+                        ImGui::Separator();
+                        ImGui::Text("Selected Coin Details");
+
+                        ImGui::Text("Name: %s (%s)", selected->name.c_str(), selected->symbol.c_str());
+                        ImGui::Text("Current Price: $%.2f", selected->current_price);
+                        ImGui::Text("24h Change: %.2f%%", selected->price_change_24h);
+                        ImGui::Text("Market Cap: $%.0f", selected->market_cap);
+
+                        // --- NEW: price history graph ---
+                        auto it = g_priceHistory.find(selected->symbol);
+                        if (it != g_priceHistory.end() && it->second.size() >= 2) {
+                            const std::vector<float>& hist = it->second;
+
+                            // Compute min/max for nicer scaling
+                            float minPrice = hist[0];
+                            float maxPrice = hist[0];
+                            for (float v : hist) {
+                                if (v < minPrice) minPrice = v;
+                                if (v > maxPrice) maxPrice = v;
+                            }
+
+                            // Add a small margin
+                            float scaleMin = minPrice * 0.95f;
+                            float scaleMax = maxPrice * 1.05f;
+
+                            ImGui::Spacing();
+                            ImGui::Text("Price History (recent refreshes):");
+                            ImGui::PlotLines(
+                                "",                    // no label inside the graph
+                                hist.data(),
+                                static_cast<int>(hist.size()),
+                                0,
+                                nullptr,               // no overlay text
+                                scaleMin,
+                                scaleMax,
+                                ImVec2(0, 100.0f)      // width auto, height ~100px
+                            );
+                        }
+                        else {
+                            ImGui::Spacing();
+                            ImGui::Text("Price History: collecting data...");
+                        }
+                        // --- END: price history graph ---
+                    }
+                }
+                // (we'll add the details panel here in the next step)
                 ImGui::EndTable();
             }
             ImGui::End();

@@ -102,7 +102,7 @@ Installation
 Clone the repository
 
 Bash
-git clone [https://github.com/YourUsername/CryptoTracker.git](https://github.com/Omar-Alian-dev/CryptoTracker.git)
+git clone [https://github.com/Omar-Alian-dev/CryptoTracker.git](https://github.com/Omar-Alian-dev/CryptoTracker.git)
 cd CryptoTracker
 Build the project
 

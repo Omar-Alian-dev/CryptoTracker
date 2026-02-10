@@ -11,9 +11,7 @@
 - [❗ Problem Statement](#-problem-statement)
 - [✨ Features](#-features)
 - [🛠️ Technical Stack](#-technical-stack)
-- [🏗️ Architecture](#-architecture)
 - [🚀 Getting Started](#-getting-started)
-- [📸 Demo](#-demo)
 - [🔮 Future Enhancements](#-future-enhancements)
 - [👤 About the Developer](#-about-the-developer)
 - [🤝 Contributing](#-contributing)
@@ -92,43 +90,26 @@ Traditional crypto dashboards often struggle with performance bottlenecks.
 | **Platform** | **Windows + DirectX11** | Backend rendering pipeline |
 
 ---
+🚀 Getting Started
+Prerequisites
+Visual Studio 2022 (with C++ Desktop Development workload)
 
-## 🏗️ Architecture
+C++17 compliant compiler
 
-CryptoTracker uses a multi-threaded client-side fetching architecture to decouple the UI from network operations.
+Windows 10/11
 
-**🔄 Flow Overview:**
-1.  **UI Initialization:** ImGui interface starts up.
-2.  **Background Worker:** A dedicated thread begins the fetch loop.
-3.  **Data Parsing:** JSON responses are parsed into `CryptoCoin` models.
-4.  **State Update:** History buffers and coin lists are updated safely via Mutex.
-5.  **Rendering:** The UI reads the updated state and renders the table/graphs.
+DirectX11 compatible GPU
 
-```text
-+------------------------------+
-|       ImGui UI Layer         |
-|   - Dashboard Table          |
-|   - Search Bar               |
-|   - Favorites Toggle         |
-|   - Coin Details Panel       |
-|   - Live Price Graph         |
-+------------------------------+
-              |
-              v
-+------------------------------+
-|    Application Controller    |
-+------------------------------+
-              |
-              v
-+------------------------------+
-| Background Data Fetch Thread |
-|  - HTTPS Requests            |
-|  - Rate-Limit Backoff        |
-|  - Mutex-Protected Updates   |
-+------------------------------+
-              |
-              v
-+------------------------------+
-|     Persistence Layer        |
-|  - favorites.txt storage     |
-+------------------------------+
+Installation
+Clone the repository
+
+Bash
+git clone [https://github.com/YourUsername/CryptoTracker.git](https://github.com/YourUsername/CryptoTracker.git)
+cd CryptoTracker
+Build the project
+
+Open the .sln solution file in Visual Studio.
+
+Select Release or Debug configuration.
+
+Press F5 to build and run.
